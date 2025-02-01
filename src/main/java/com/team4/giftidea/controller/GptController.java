@@ -5,6 +5,11 @@ import com.team4.giftidea.dto.GptRequestDTO;
 import com.team4.giftidea.dto.GptResponseDTO;
 import com.team4.giftidea.entity.Product;
 import com.team4.giftidea.service.ProductService;
+
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.media.Content;
+import io.swagger.v3.oas.annotations.media.Schema;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -35,13 +40,25 @@ public class GptController {
   }
 
   /**
-   * 1️⃣ 파일 업로드 및 전처리 API
-   * 프론트엔드에서 업로드한 카카오톡 파일을 서버에서 전처리하여 정제된 메시지를 반환합니다.
+   * 1️⃣ **카카오톡 파일 업로드 및 전처리**
+   * - 프론트엔드에서 **카카오톡 파일을 업로드**
+   * - 대상 이름을 입력받아 해당 사용자의 메시지만 추출
+   * - **이모티콘, 불필요한 특수문자, 반복 문자(ㅋㅋ, ㅎㅎ, ㅠㅠ 등) 정리**
+   * - 전처리된 **깨끗한 메시지 리스트 반환**
    *
-   * @param file MultipartFile (카톡 파일)
-   * @param targetName 분석할 대상의 이름
-   * @return 전처리된 텍스트 리스트
+   * @param file 카카오톡 텍스트 파일 (MultipartFile)
+   * @param targetName 분석할 대화 상대 이름
+   * @return 정제된 메시지 리스트
    */
+  @Operation(
+      summary = "카카오톡 파일 업로드 및 전처리",
+      description = "카카오톡 대화 내용을 업로드하고 특정 사용자의 메시지만 정리하여 반환합니다.",
+      responses = {
+          @ApiResponse(responseCode = "200", description = "정제된 메시지 반환",
+              content = @Content(mediaType = "application/json", schema = @Schema(implementation = List.class))),
+          @ApiResponse(responseCode = "500", description = "파일 처리 오류 발생")
+      }
+  )
   @PostMapping("/upload")
   public List<String> uploadFile(
       @RequestParam("file") MultipartFile file,
@@ -66,15 +83,26 @@ public class GptController {
   }
 
   /**
-   * 2️⃣ 선물 추천 API
-   * 정제된 메시지를 기반으로 GPT에서 카테고리 생성 후, DB에서 상품을 검색하여 반환합니다.
+   * 2️⃣ **선물 추천 API**
+   * - 사용자의 **카카오톡 대화 내용을 기반으로 GPT가 선물 추천**
+   * - **관계, 성별, 테마(생일, 기념일 등)** 정보를 기반으로 선물 추천 카테고리를 생성
+   * - **추천된 카테고리를 기반으로 DB에서 상품 검색**
    *
-   * @param processedText 정제된 메시지 리스트
-   * @param relation 사용자와의 관계 (예: couple, parent, friend)
+   * @param processedText 정제된 메시지 리스트 (이전 `/upload` API 응답 값)
+   * @param relation 사용자와의 관계 (couple, parent, friend, housewarming, valentine 등)
    * @param sex 성별 (male, female)
    * @param theme 선물 테마 (birth, anniversary 등)
    * @return 추천된 상품 리스트
    */
+  @Operation(
+      summary = "GPT 선물 추천 API",
+      description = "정제된 카톡 메시지와 관계, 성별, 테마를 기반으로 GPT가 선물을 추천하고, 해당 카테고리의 상품을 검색합니다.",
+      responses = {
+          @ApiResponse(responseCode = "200", description = "추천된 상품 리스트 반환",
+              content = @Content(mediaType = "application/json", schema = @Schema(implementation = List.class))),
+          @ApiResponse(responseCode = "500", description = "GPT 요청 오류 발생")
+      }
+  )
   @PostMapping("/recommend")
   public List<Product> recommendGifts(
       @RequestBody List<String> processedText,
@@ -187,7 +215,14 @@ public class GptController {
   }
 
   /**
-   * 카카오톡 파일 전처리
+   * 카카오톡 파일 전처리 함수
+   * - 카카오톡에서 대상 사용자의 메시지만 추출
+   * - 불필요한 문자, 특수기호, 이모티콘 정리
+   * - 사용자의 최신 메시지부터 일정 개수만 유지
+   *
+   * @param file 원본 카카오톡 텍스트 파일
+   * @param targetName 분석할 사용자 이름
+   * @return 정제된 메시지 리스트
    */
   private List<String> preprocessKakaoFile(File file, String targetName) {
     List<String> processedMessages = new ArrayList<>();
