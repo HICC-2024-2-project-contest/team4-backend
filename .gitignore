@@ -52,6 +52,7 @@ Thumbs.db
 $RECYCLE.BIN/
 
 # 특정 프로젝트 관련 임시 파일
+processed_kakaochat.txt
 .write_access_check_file.temp
 example.txt
 

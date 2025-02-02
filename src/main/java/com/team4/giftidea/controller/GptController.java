@@ -1,5 +1,6 @@
 package com.team4.giftidea.controller;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.team4.giftidea.configuration.GptConfig;
 import com.team4.giftidea.dto.GptRequestDTO;
 import com.team4.giftidea.dto.GptResponseDTO;
@@ -7,9 +8,7 @@ import com.team4.giftidea.entity.Product;
 import com.team4.giftidea.service.ProductService;
 
 import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.media.Content;
-import io.swagger.v3.oas.annotations.media.Schema;
-import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.Parameter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -40,100 +39,119 @@ public class GptController {
   }
 
   /**
-   * 1️⃣ **카카오톡 파일 업로드 및 전처리**
-   * - 프론트엔드에서 **카카오톡 파일을 업로드**
-   * - 대상 이름을 입력받아 해당 사용자의 메시지만 추출
-   * - **이모티콘, 불필요한 특수문자, 반복 문자(ㅋㅋ, ㅎㅎ, ㅠㅠ 등) 정리**
-   * - 전처리된 **깨끗한 메시지 리스트 반환**
-   *
-   * @param file 카카오톡 텍스트 파일 (MultipartFile)
-   * @param targetName 분석할 대화 상대 이름
-   * @return 정제된 메시지 리스트
+   * @param file        전송된 파일 (카카오톡 대화 내용)
+   * @param targetName  대상 이름 (ex: '여자친구', '남자친구')
+   * @param relation    관계 (ex: 'couple', 'friend', etc.)
+   * @param sex         대상 성별 ('male' 또는 'female')
+   * @param theme       선물의 주제 (ex: 'birthday', 'valentine', etc.)
+   * @return 추천된 상품 목록
    */
-  @Operation(
-      summary = "카카오톡 파일 업로드 및 전처리",
-      description = "카카오톡 대화 내용을 업로드하고 특정 사용자의 메시지만 정리하여 반환합니다.",
-      responses = {
-          @ApiResponse(responseCode = "200", description = "정제된 메시지 반환",
-              content = @Content(mediaType = "application/json", schema = @Schema(implementation = List.class))),
-          @ApiResponse(responseCode = "500", description = "파일 처리 오류 발생")
-      }
-  )
-  @PostMapping("/upload")
-  public List<String> uploadFile(
-      @RequestParam("file") MultipartFile file,
-      @RequestParam("targetName") String targetName) {
+  /**
+   * @param file        전송된 파일 (카카오톡 대화 내용)
+   * @param targetName  대상 이름 (ex: '여자친구', '남자친구')
+   * @param relation    관계 (ex: 'couple', 'friend', etc.)
+   * @param sex         대상 성별 ('male' 또는 'female')
+   * @param theme       선물의 주제 (ex: 'birthday', 'valentine', etc.)
+   * @return 추천된 상품 목록
+   */
+  @PostMapping("/process")
+  @Operation(description = "카카오톡 대화를 분석하여 키워드를 추출하고 그에 맞는 선물 목록을 추천합니다.")
+  public List<Product> processFileAndRecommend(
+      @RequestParam("file") @Parameter(description = "카카오톡 대화 내용이 포함된 파일", required = true) MultipartFile file,
+      @RequestParam("targetName") @Parameter(description = "대상 이름", required = true) String targetName,
+      @RequestParam("relation") @Parameter(description = "대상과의 관계", required = true) String relation,
+      @RequestParam("sex") @Parameter(description = "대상 성별", required = true) String sex,
+      @RequestParam("theme") @Parameter(description = "선물의 주제", required = true) String theme) {
+
+    // 1. 파일 전처리
+    List<String> processedMessages = preprocessKakaoFile(file, targetName);
+
+    // 2. GPT API 호출: 전처리된 메시지로 키워드 반환
+    String categories = generatePrompt(processedMessages, relation, sex, theme);  // 이미 키워드를 추출했음
+
+    // 3. 키워드 리스트로 변환된 값 그대로 사용
+    List<String> keywords = Arrays.asList(categories.split(","));
+    keywords.replaceAll(String::trim);  // 공백 제거
+
+    log.debug("추출된 키워드 목록: {}", keywords);
+
+    // 4. 상품 검색 (DB에서 키워드 기반으로 추천 상품 검색)
+    List<Product> products = productService.searchByKeywords(keywords);
+
+    // 검색된 상품 확인 로그
+    log.debug("검색된 상품: {}", products);
+
+    return products;  // 상품 목록 반환
+  }
+
+  private List<String> preprocessKakaoFile(MultipartFile file, String targetName) {
+    List<String> processedMessages = new ArrayList<>();
+    int formatType = detectFormatType(file);
+    File outputFile = null;
 
     try {
-      // 파일 저장
-      File tempFile = File.createTempFile("kakaochat", ".txt");
-      file.transferTo(tempFile);
+      // 파일을 임시로 저장
+      outputFile = File.createTempFile("processed_kakaochat", ".txt");
 
-      // 파일 전처리
-      List<String> processedMessages = preprocessKakaoFile(tempFile, targetName);
+      try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8));
+           BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile))) { // 파일에 쓸 준비
 
-      // 파일 삭제 (일회성 사용)
-      tempFile.delete();
+        String line;
 
-      return processedMessages;
+        while ((line = reader.readLine()) != null) {
+          // 양식 1 (예시 1) 처리
+          if (formatType == 1) {
+            if (line.contains(targetName) && !line.trim().isEmpty()) {
+              line = line.replaceAll("\\[.*?\\] \\[.*?\\] ", "").trim();  // 시간과 이름 제거
+              line = line.replaceAll("[ㅎㅋ.]+", "").trim();  // 반복 문자 및 특수문자 제거
+              processedMessages.add(line);
+              writer.write(line);
+              writer.newLine();  // 각 메시지 끝에 새 줄 추가
+            }
+          }
+          // 양식 2 (예시 2) 처리
+          else if (formatType == 2) {
+            if (line.contains(targetName) && !line.trim().isEmpty()) {
+              line = line.replaceAll("^" + targetName + " : ", "").trim();  // 대화자 이름 제거
+              line = line.replaceAll("[ㅎㅋ.]+", "").trim();  // 반복 문자 및 특수문자 제거
+              processedMessages.add(line);
+              writer.write(line);
+              writer.newLine();  // 각 메시지 끝에 새 줄 추가
+            }
+          }
+        }
+      }
     } catch (IOException e) {
       log.error("파일 처리 오류: ", e);
-      return Collections.emptyList();
     }
+
+    // 파일 삭제 (전처리 후 필요 없으므로 삭제)
+    if (outputFile != null) {
+      outputFile.delete();
+    }
+
+    return processedMessages;
   }
 
-  /**
-   * 2️⃣ **선물 추천 API**
-   * - 사용자의 **카카오톡 대화 내용을 기반으로 GPT가 선물 추천**
-   * - **관계, 성별, 테마(생일, 기념일 등)** 정보를 기반으로 선물 추천 카테고리를 생성
-   * - **추천된 카테고리를 기반으로 DB에서 상품 검색**
-   *
-   * @param processedText 정제된 메시지 리스트 (이전 `/upload` API 응답 값)
-   * @param relation 사용자와의 관계 (couple, parent, friend, housewarming, valentine 등)
-   * @param sex 성별 (male, female)
-   * @param theme 선물 테마 (birth, anniversary 등)
-   * @return 추천된 상품 리스트
-   */
-  @Operation(
-      summary = "GPT 선물 추천 API",
-      description = "정제된 카톡 메시지와 관계, 성별, 테마를 기반으로 GPT가 선물을 추천하고, 해당 카테고리의 상품을 검색합니다.",
-      responses = {
-          @ApiResponse(responseCode = "200", description = "추천된 상품 리스트 반환",
-              content = @Content(mediaType = "application/json", schema = @Schema(implementation = List.class))),
-          @ApiResponse(responseCode = "500", description = "GPT 요청 오류 발생")
+  private int detectFormatType(MultipartFile file) {
+    try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
+      String firstLine = reader.readLine();
+
+      if (firstLine != null && firstLine.contains("님과 카카오톡 대화")) {
+        return 1; // 양식 1
+      } else {
+        return 2; // 양식 2
       }
-  )
-  @PostMapping("/recommend")
-  public List<Product> recommendGifts(
-      @RequestBody List<String> processedText,
-      @RequestParam(name = "relation") String relation,
-      @RequestParam(name = "sex") String sex,
-      @RequestParam(name = "theme") String theme) {
 
-    // GPT 프롬프트 생성
-    String prompt = generatePrompt(processedText, relation, sex, theme);
-
-    // GPT API 호출
-    GptRequestDTO request = new GptRequestDTO(gptConfig.getModel(), prompt);
-    GptResponseDTO response = restTemplate.postForObject(gptConfig.getApiUrl(), request, GptResponseDTO.class);
-
-    if (response != null && !response.getChoices().isEmpty()) {
-      // GPT 응답에서 카테고리 추출
-      String categories = response.getChoices().get(0).getMessage().getContent();
-      List<String> keywords = Arrays.asList(categories.split(","));
-
-      // DB에서 추천 상품 검색
-      return productService.searchByKeywords(keywords, 0);
+    } catch (IOException e) {
+      log.error("파일 판별 오류: ", e);
     }
 
-    return List.of(); // 추천할 상품이 없을 경우 빈 리스트 반환
+    return 0; // 기본값: 알 수 없는 양식
   }
 
-  /**
-   * GPT 프롬프트 생성
-   */
-  private String generatePrompt(List<String> messages, String relation, String sex, String theme) {
-    String combinedMessages = String.join("\n", messages);
+  private String generatePrompt(List<String> processedMessages, String relation, String sex, String theme) {
+    String combinedMessages = String.join("\n", processedMessages);  // List<String>을 하나의 String으로 합침
 
     switch (relation) {
       case "couple":
@@ -152,92 +170,165 @@ public class GptController {
     }
   }
 
-  /**
-   * GPT 응답에서 키워드 추출
-   */
-  private String extractKeywordsAndReasonsCoupleMan(String theme, String message) {
-    return generateText(String.format("""
-                다음 텍스트를 참고하여 남자 애인이 %s에 선물로 받으면 좋아할 카테고리 3개와 판단 근거를 제공해주세요.
-                텍스트: %s
-                """, theme, message));
-  }
-
-  private String extractKeywordsAndReasonsCoupleWoman(String theme, String message) {
-    return generateText(String.format("""
-                다음 텍스트를 참고하여 여자 애인이 %s에 선물로 받으면 좋아할 카테고리 3개와 판단 근거를 제공해주세요.
-                텍스트: %s
-                """, theme, message));
-  }
-
-  private String extractKeywordsAndReasonsParents(String theme, String message) {
-    return generateText(String.format("""
-                다음 텍스트를 참고하여 부모님이 %s에 선물로 받으면 좋아할 카테고리 3개와 판단 근거를 제공해주세요.
-                텍스트: %s
-                """, theme, message));
-  }
-
-  private String extractKeywordsAndReasonsFriend(String theme, String message) {
-    return generateText(String.format("""
-                다음 텍스트를 참고하여 친구가 %s에 선물로 받으면 좋아할 카테고리 3개와 판단 근거를 제공해주세요.
-                텍스트: %s
-                """, theme, message));
-  }
-
-  private String extractKeywordsAndReasonsHousewarming(String message) {
-    return generateText(String.format("""
-                다음 텍스트를 참고하여 집들이에 선물로 받으면 좋아할 카테고리 3개와 판단 근거를 제공해주세요.
-                텍스트: %s
-                """, message));
-  }
-
-  private String extractKeywordsAndReasonsSeasonal(String theme, String message) {
-    return generateText(String.format("""
-                다음 텍스트를 참고하여 %s에 선물로 받으면 좋아할 카테고리 3개와 판단 근거를 제공해주세요.
-                텍스트: %s
-                """, theme, message));
-  }
-
-  /**
-   * GPT API 호출
-   */
   private String generateText(String prompt) {
     GptRequestDTO request = new GptRequestDTO(gptConfig.getModel(), prompt);
     try {
+      log.info("GPT 요청 시작 - 모델: {}", gptConfig.getModel());
+      log.debug("요청 내용: {}", prompt);
+
+      // HTTP 요청 전에 request 객체 로깅
+      ObjectMapper mapper = new ObjectMapper();
+      log.debug("전체 요청 바디: {}", mapper.writeValueAsString(request));
+
       GptResponseDTO response = restTemplate.postForObject(gptConfig.getApiUrl(), request, GptResponseDTO.class);
-      if (response != null && !response.getChoices().isEmpty()) {
-        return response.getChoices().get(0).getMessage().getContent();
+
+      // 응답 검증
+      if (response != null) {
+        log.debug("GPT 응답 수신: {}", mapper.writeValueAsString(response));
+
+        // 응답에 'choices'가 있고, 그 중 첫 번째 항목이 존재하는지 확인
+        if (response.getChoices() != null && !response.getChoices().isEmpty()) {
+          String content = response.getChoices().get(0).getMessage().getContent();
+          log.debug("추출된 콘텐츠: {}", content);
+
+          // 필요한 형태로 카테고리 추출 (예: "1. [무선이어폰, 스마트워치, 향수]" 형태)
+          if (content.contains("1.")) {
+            String categories = content.split("1.")[1].split("\n")[0]; // 첫 번째 카테고리 라인 추출
+            log.debug("GPT 응답에서 추출된 카테고리: {}", categories);
+
+            // 괄호 안의 항목들을 추출하고, 쉼표로 구분하여 키워드 리스트 만들기
+            String[] categoryArray = categories.split("\\[|\\]")[1].split(",");
+            List<String> keywords = new ArrayList<>();
+            for (String category : categoryArray) {
+              keywords.add(category.trim());
+            }
+            return String.join(", ", keywords); // 최종적으로 카테고리들을 반환
+          } else {
+            log.warn("GPT 응답에서 카테고리 정보가 올바르지 않습니다.");
+          }
+        } else {
+          log.warn("GPT 응답에 'choices'가 없거나 빈 리스트입니다.");
+        }
+      } else {
+        log.warn("GPT 응답이 null입니다.");
       }
       return "GPT 응답 오류 발생";
     } catch (Exception e) {
       log.error("GPT 요청 중 오류 발생: ", e);
+      log.error("상세 오류 메시지: {}", e.getMessage());
+      if (e.getCause() != null) {
+        log.error("원인 예외: {}", e.getCause().getMessage());
+      }
       return "GPT 요청 오류";
     }
   }
 
-  /**
-   * 카카오톡 파일 전처리 함수
-   * - 카카오톡에서 대상 사용자의 메시지만 추출
-   * - 불필요한 문자, 특수기호, 이모티콘 정리
-   * - 사용자의 최신 메시지부터 일정 개수만 유지
-   *
-   * @param file 원본 카카오톡 텍스트 파일
-   * @param targetName 분석할 사용자 이름
-   * @return 정제된 메시지 리스트
-   */
-  private List<String> preprocessKakaoFile(File file, String targetName) {
-    List<String> processedMessages = new ArrayList<>();
+  private String extractKeywordsAndReasonsCoupleMan(String theme, String message) {
+    String prompt = String.format("""
+    다음 텍스트를 참고하여 남자 애인이 %s에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
+    카테고리: 남성 지갑, 남성 스니커즈, 백팩, 토트백, 크로스백, 벨트, 선글라스, 향수, 헬스가방, 무선이어폰, 스마트워치
 
-    try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(file), StandardCharsets.UTF_8))) {
-      String line;
-      while ((line = reader.readLine()) != null) {
-        if (line.contains(targetName)) {
-          processedMessages.add(line);
-        }
-      }
-    } catch (IOException e) {
-      log.error("파일 처리 오류: ", e);
-    }
+    텍스트: %s
 
-    return processedMessages;
+    출력 형식:
+    1. [카테고리1,카테고리2,카테고리3]
+    2. 
+       - 카테고리1: [근거1]
+       - 카테고리2: [근거2]
+       - 카테고리3: [근거3]
+    """, theme, message);
+
+    return generateText(prompt);  // GPT 모델 호출
+  }
+
+  private String extractKeywordsAndReasonsCoupleWoman(String theme, String message) {
+    String prompt = String.format("""
+    다음 텍스트를 참고하여 여자 애인이 %s에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
+    카테고리: 여성 지갑, 여성 스니커즈, 숄더백, 토트백, 크로스백, 향수, 목걸이, 무선이어폰, 스마트워치
+
+    텍스트: %s
+
+    출력 형식:
+    1. [카테고리1,카테고리2,카테고리3]
+    2. 
+       - 카테고리1: [근거1]
+       - 카테고리2: [근거2]
+       - 카테고리3: [근거3]
+    """, theme, message);
+
+    return generateText(prompt);  // GPT 모델 호출
+  }
+
+  private String extractKeywordsAndReasonsParents(String theme, String message) {
+    String prompt = String.format("""
+    다음 텍스트를 참고하여 부모님이 %s에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
+    카테고리: 현금 박스, 안마기기, 남성 스니커즈, 건강식품
+
+    텍스트: %s
+
+    출력 형식:
+    1. [카테고리1,카테고리2,카테고리3]
+    2. 
+       - 카테고리1: [근거1]
+       - 카테고리2: [근거2]
+       - 카테고리3: [근거3]
+    """, theme, message);
+
+    return generateText(prompt);  // GPT 모델 호출
+  }
+
+  private String extractKeywordsAndReasonsFriend(String theme, String message) {
+    String prompt = String.format("""
+    다음 텍스트를 참고하여 친구가 %s에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
+    제시된 카테고리에 없는 추천 선물이 있다면 3개에 포함해주세요.
+    카테고리: 핸드크림, 텀블러, 립밤
+
+    텍스트: %s
+
+    출력 형식:
+    1. [카테고리1,카테고리2,카테고리3]
+    2. 
+       - 카테고리1: [근거1]
+       - 카테고리2: [근거2]
+       - 카테고리3: [근거3]
+    """, theme, message);
+
+    return generateText(prompt);  // GPT 모델 호출
+  }
+
+  private String extractKeywordsAndReasonsHousewarming(String message) {
+    String prompt = String.format("""
+    다음 텍스트를 참고하여 집들이에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
+    카테고리: 조명, 핸드워시, 식기, 디퓨저, 꽃, 티세트, 휴지
+
+    텍스트: %s
+
+    출력 형식:
+    1. [카테고리1,카테고리2,카테고리3]
+    2. 
+       - 카테고리1: [근거1]
+       - 카테고리2: [근거2]
+       - 카테고리3: [근거3]
+    """, message);
+
+    return generateText(prompt);  // GPT 모델 호출
+  }
+
+  private String extractKeywordsAndReasonsSeasonal(String theme, String message) {
+    String prompt = String.format("""
+    다음 텍스트를 참고하여 %s에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
+    카테고리: 초콜릿, 수제 초콜릿, 립밤, 파자마세트, 꽃
+
+    텍스트: %s
+
+    출력 형식:
+    1. [카테고리1,카테고리2,카테고리3]
+    2. 
+       - 카테고리1: [근거1]
+       - 카테고리2: [근거2]
+       - 카테고리3: [근거3]
+    """, theme, message);
+
+    return generateText(prompt);  // GPT 모델 호출
   }
 }

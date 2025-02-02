@@ -80,7 +80,7 @@ public class ProductController {
 	/**
 	 * 매일 20시 12분에 상품 정보를 자동으로 크롤링하는 스케줄러
 	 */
-	@Scheduled(cron = "0 12 20 * * *")
+	@Scheduled(cron = "0 16 17 * * *")
 	public void scheduleCrawl() {
 		crawlAndStoreData();
 	}

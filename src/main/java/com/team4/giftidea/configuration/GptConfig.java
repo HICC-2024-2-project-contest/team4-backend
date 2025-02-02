@@ -29,15 +29,13 @@ public class GptConfig {
      */
     @Bean
     public RestTemplate restTemplate() {
-        log.info("Initializing RestTemplate for OpenAI API...");
-
         RestTemplate restTemplate = new RestTemplate();
         restTemplate.getInterceptors().add((request, body, execution) -> {
-            request.getHeaders().add("Authorization", "Bearer " + openAiKey);
+            String authHeader = "Bearer " + openAiKey;
+            request.getHeaders().add("Authorization", authHeader);
             request.getHeaders().add("Content-Type", "application/json");
             return execution.execute(request, body);
         });
-
         return restTemplate;
     }
 
