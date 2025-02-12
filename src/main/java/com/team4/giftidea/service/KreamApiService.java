@@ -25,8 +25,7 @@ import java.util.List;
 public class KreamApiService {
 
 	private static final String KREAM_SEARCH_URL = "https://kream.co.kr/search?keyword=%s&tab=products";
-	private static final String USER_AGENT = "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
-		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36";
+	private static final String USER_AGENT = "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) " + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.90 Safari/537.36";
 
 	@Value("${selenium.chromedriver-path}")
 	private String chromeDriverPath;
@@ -49,8 +48,14 @@ public class KreamApiService {
 		System.setProperty("webdriver.chrome.driver", chromeDriverPath);
 
 		ChromeOptions options = new ChromeOptions();
-		options.addArguments(USER_AGENT);
-
+		options.setBinary("/opt/google/chrome/chrome");
+		options.addArguments("--headless"); // Headless 모드 유지
+		options.addArguments("--disable-gpu");
+		options.addArguments("--no-sandbox");
+		options.addArguments("--disable-dev-shm-usage");
+		options.addArguments("--remote-debugging-port=9222");
+		options.addArguments("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.90 Safari/537.36"); // 브라우저 속이기
+		
 		WebDriver driver = new ChromeDriver(options);
 
 		try {
