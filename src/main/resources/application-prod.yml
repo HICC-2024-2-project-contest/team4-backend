@@ -5,7 +5,7 @@ naver:
     client-secret: ${NAVER_API_CLIENT_SECRET}
 
 selenium:
-  chromedriver-path: "/usr/local/bin/chromedriver"
+  chromedriver-path: "/usr/bin/chromedriver"
 
 spring:
   datasource:

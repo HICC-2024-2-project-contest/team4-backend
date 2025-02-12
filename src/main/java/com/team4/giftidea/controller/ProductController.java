@@ -47,7 +47,8 @@ public class ProductController {
 	@GetMapping("/crawl")
 	public void crawlAndStoreData() {
 		// 네이버 키워드 목록
-		List<String> naverKeywords = List.of("현금 박스", "부모님 신발", "건강식품", "헬스가방");
+		List<String> naverKeywords = List.of("현금 박스", "부모님 신발", "건강식품", "헬스가방", "핸드크림", "디퓨저", "오설록 티세트",
+	"휴지", "초콜릿", "수제 초콜릿 키트", "파자마세트"	);
 
 		// 쿠팡 키워드 목록
 		List<String> coupangKeywords = List.of("안마기기", "무선이어폰", "스마트워치");
@@ -55,7 +56,7 @@ public class ProductController {
 		// Kream 키워드 목록
 		List<String> kreamKeywords = List.of(
 			"남성 지갑", "남성 스니커즈", "백팩", "토트백", "크로스백", "벨트",
-			"선글라스", "향수", "여성 지갑", "여성 스니커즈", "숄더백", "크로스백", "목걸이"
+			"선글라스", "향수", "여성 지갑", "여성 스니커즈", "숄더백", "목걸이", "텀블러", "립밤", "조명", "핸드워시", "식기"
 		);
 
 		// 네이버 크롤링

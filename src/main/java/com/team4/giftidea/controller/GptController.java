@@ -9,6 +9,9 @@ import com.team4.giftidea.service.ProductService;
 
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
@@ -19,9 +22,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-/**
- * GPT API와 연동하여 선물 추천을 제공하는 컨트롤러
- */
+@Tag(name = "GPT 추천 API", description = "GPT를 이용하여 사용자 맞춤 선물 추천을 제공하는 API")
 @RestController
 @RequestMapping("/api/gpt")
 @Slf4j
@@ -39,23 +40,22 @@ public class GptController {
   }
 
   /**
-   * @param file        전송된 파일 (카카오톡 대화 내용)
-   * @param targetName  대상 이름 (ex: '여자친구', '남자친구')
-   * @param relation    관계 (ex: 'couple', 'friend', etc.)
-   * @param sex         대상 성별 ('male' 또는 'female')
-   * @param theme       선물의 주제 (ex: 'birthday', 'valentine', etc.)
+   * 카카오톡 대화 파일을 분석하여 키워드를 추출하고, 추천 상품 목록을 반환하는 API
+   *
+   * @param file       카카오톡 대화 내용이 포함된 파일
+   * @param targetName 대상 이름 (예: "여자친구", "남자친구")
+   * @param relation   관계 (예: "couple", "friend", "parent")
+   * @param sex        대상 성별 ("male" 또는 "female")
+   * @param theme      선물 테마 (예: "birthday", "valentine")
    * @return 추천된 상품 목록
    */
-  /**
-   * @param file        전송된 파일 (카카오톡 대화 내용)
-   * @param targetName  대상 이름 (ex: '여자친구', '남자친구')
-   * @param relation    관계 (ex: 'couple', 'friend', etc.)
-   * @param sex         대상 성별 ('male' 또는 'female')
-   * @param theme       선물의 주제 (ex: 'birthday', 'valentine', etc.)
-   * @return 추천된 상품 목록
-   */
+  @Operation(summary = "대화 분석 후 추천 상품 반환", description = "카카오톡 대화를 분석하여 GPT API를 통해 키워드를 추출하고, 해당 키워드에 맞는 추천 상품을 반환합니다.")
+  @ApiResponses({
+      @ApiResponse(responseCode = "200", description = "추천 상품 목록 반환"),
+      @ApiResponse(responseCode = "400", description = "잘못된 요청 파라미터"),
+      @ApiResponse(responseCode = "500", description = "서버 내부 오류 발생")
+  })
   @PostMapping("/process")
-  @Operation(description = "카카오톡 대화를 분석하여 키워드를 추출하고 그에 맞는 선물 목록을 추천합니다.")
   public List<Product> processFileAndRecommend(
       @RequestParam("file") @Parameter(description = "카카오톡 대화 내용이 포함된 파일", required = true) MultipartFile file,
       @RequestParam("targetName") @Parameter(description = "대상 이름", required = true) String targetName,
@@ -84,42 +84,48 @@ public class GptController {
     return products;  // 상품 목록 반환
   }
 
+  private static final int MAX_TOKENS = 15000; // 15000 토큰 제한
+
   private List<String> preprocessKakaoFile(MultipartFile file, String targetName) {
     List<String> processedMessages = new ArrayList<>();
     int formatType = detectFormatType(file);
     File outputFile = null;
+    int currentTokenCount = 0;
+    StringBuilder currentChunk = new StringBuilder();
 
     try {
-      // 파일을 임시로 저장
       outputFile = File.createTempFile("processed_kakaochat", ".txt");
 
       try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8));
-           BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile))) { // 파일에 쓸 준비
+           BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile))) {
 
         String line;
-
         while ((line = reader.readLine()) != null) {
-          // 양식 1 (예시 1) 처리
-          if (formatType == 1) {
-            if (line.contains(targetName) && !line.trim().isEmpty()) {
-              line = line.replaceAll("\\[.*?\\] \\[.*?\\] ", "").trim();  // 시간과 이름 제거
-              line = line.replaceAll("[ㅎㅋ.]+", "").trim();  // 반복 문자 및 특수문자 제거
-              processedMessages.add(line);
-              writer.write(line);
-              writer.newLine();  // 각 메시지 끝에 새 줄 추가
+          // 해당 targetName이 포함된 경우만 처리
+          if (line.contains(targetName) && !line.trim().isEmpty()) {
+            String formattedLine = formatLine(line, formatType, targetName);
+            int lineTokenCount = countTokens(formattedLine);
+
+            // 현재 청크가 15000 토큰을 초과할 경우 새로운 청크 생성
+            if (currentTokenCount + lineTokenCount > MAX_TOKENS) {
+              processedMessages.add(currentChunk.toString()); // 기존 청크 저장
+              currentChunk.setLength(0); // 새 청크 초기화
+              currentTokenCount = 0;
             }
-          }
-          // 양식 2 (예시 2) 처리
-          else if (formatType == 2) {
-            if (line.contains(targetName) && !line.trim().isEmpty()) {
-              line = line.replaceAll("^" + targetName + " : ", "").trim();  // 대화자 이름 제거
-              line = line.replaceAll("[ㅎㅋ.]+", "").trim();  // 반복 문자 및 특수문자 제거
-              processedMessages.add(line);
-              writer.write(line);
-              writer.newLine();  // 각 메시지 끝에 새 줄 추가
-            }
+
+            // 현재 청크에 추가
+            currentChunk.append(formattedLine).append("\n");
+            currentTokenCount += lineTokenCount;
+            writer.write(formattedLine);
+            writer.newLine();
           }
         }
+
+        // 마지막 청크 추가
+        if (currentChunk.length() > 0) {
+          processedMessages.add(currentChunk.toString());
+        }
+
       }
     } catch (IOException e) {
       log.error("파일 처리 오류: ", e);
@@ -131,6 +137,25 @@ public class GptController {
     }
 
     return processedMessages;
+  }
+
+  /**
+   * ✅ Format Type에 따라 카카오톡 메시지를 정리
+   */
+  private String formatLine(String line, int formatType, String targetName) {
+    if (formatType == 1) {
+      return line.replaceAll("\\[.*?\\] \\[.*?\\] ", "").replaceAll("[ㅎㅋ.]+", "").trim(); // 양식 1: [시간] [이름] 제거
+    } else if (formatType == 2) {
+      return line.replaceAll("^" + targetName + " : ", "").replaceAll("[ㅎㅋ.]+", "").trim(); // 양식 2: "이름 :" 제거
+    }
+    return line;
+  }
+
+  /**
+   * ✅ 메시지의 토큰 개수 세는 함수 (단순 공백 기준으로 토큰 계산)
+   */
+  private int countTokens(String text) {
+    return text.split("\\s+").length; // 공백 기준으로 나누어 토큰 수 계산
   }
 
   private int detectFormatType(MultipartFile file) {
@@ -238,7 +263,7 @@ public class GptController {
        - 카테고리3: [근거3]
     """, theme, message);
 
-    return generateText(prompt);  // GPT 모델 호출
+    return generateText(prompt);
   }
 
   private String extractKeywordsAndReasonsCoupleWoman(String theme, String message) {
@@ -262,7 +287,7 @@ public class GptController {
   private String extractKeywordsAndReasonsParents(String theme, String message) {
     String prompt = String.format("""
     다음 텍스트를 참고하여 부모님이 %s에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
-    카테고리: 현금 박스, 안마기기, 남성 스니커즈, 건강식품
+    카테고리: 현금 박스, 안마기기, 부모님 신발, 건강식품
 
     텍스트: %s
 
@@ -274,7 +299,7 @@ public class GptController {
        - 카테고리3: [근거3]
     """, theme, message);
 
-    return generateText(prompt);  // GPT 모델 호출
+    return generateText(prompt);
   }
 
   private String extractKeywordsAndReasonsFriend(String theme, String message) {
@@ -293,13 +318,13 @@ public class GptController {
        - 카테고리3: [근거3]
     """, theme, message);
 
-    return generateText(prompt);  // GPT 모델 호출
+    return generateText(prompt);
   }
 
   private String extractKeywordsAndReasonsHousewarming(String message) {
     String prompt = String.format("""
     다음 텍스트를 참고하여 집들이에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
-    카테고리: 조명, 핸드워시, 식기, 디퓨저, 꽃, 티세트, 휴지
+    카테고리: 조명, 핸드워시, 식기, 디퓨저, 꽃, 오설록 티세트, 휴지
 
     텍스트: %s
 
@@ -311,13 +336,13 @@ public class GptController {
        - 카테고리3: [근거3]
     """, message);
 
-    return generateText(prompt);  // GPT 모델 호출
+    return generateText(prompt);
   }
 
   private String extractKeywordsAndReasonsSeasonal(String theme, String message) {
     String prompt = String.format("""
     다음 텍스트를 참고하여 %s에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
-    카테고리: 초콜릿, 수제 초콜릿, 립밤, 파자마세트, 꽃
+    카테고리: 초콜릿, 수제 초콜릿 키트, 립밤, 파자마세트
 
     텍스트: %s
 
@@ -329,6 +354,6 @@ public class GptController {
        - 카테고리3: [근거3]
     """, theme, message);
 
-    return generateText(prompt);  // GPT 모델 호출
+    return generateText(prompt);
   }
 }
