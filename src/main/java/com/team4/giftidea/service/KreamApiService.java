@@ -16,6 +16,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 
 /**
  * Kream 웹사이트에서 상품 정보를 크롤링하는 서비스 클래스
@@ -25,7 +26,8 @@ import java.util.List;
 public class KreamApiService {
 
 	private static final String KREAM_SEARCH_URL = "https://kream.co.kr/search?keyword=%s&tab=products";
-	private static final String USER_AGENT = "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) " + "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.90 Safari/537.36";
+	private static final String USER_AGENT = "user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+		"AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36";
 
 	@Value("${selenium.chromedriver-path}")
 	private String chromeDriverPath;
@@ -48,14 +50,8 @@ public class KreamApiService {
 		System.setProperty("webdriver.chrome.driver", chromeDriverPath);
 
 		ChromeOptions options = new ChromeOptions();
-		options.setBinary("/opt/google/chrome/chrome");
-		options.addArguments("--headless"); // Headless 모드 유지
-		options.addArguments("--disable-gpu");
-		options.addArguments("--no-sandbox");
-		options.addArguments("--disable-dev-shm-usage");
-		options.addArguments("--remote-debugging-port=9222");
-		options.addArguments("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.5735.90 Safari/537.36"); // 브라우저 속이기
-		
+		options.addArguments(USER_AGENT);
+
 		WebDriver driver = new ChromeDriver(options);
 
 		try {
@@ -105,7 +101,11 @@ public class KreamApiService {
 			String imageUrl = productElement.findElement(By.tagName("img")).getAttribute("src");
 			String link = productElement.findElement(By.tagName("a")).getAttribute("href");
 
+			// ✅ 상품 코드 (product_id) 추출
+			String productId = extractProductIdFromLink(link);
+
 			Product product = new Product();
+			product.setProductId(productId);
 			product.setTitle(title);
 			product.setPrice(price);
 			product.setImage(imageUrl);
@@ -118,5 +118,22 @@ public class KreamApiService {
 			log.warn("상품 정보 추출 실패: {}", e.getMessage());
 			return null;
 		}
+	}
+
+	/**
+	 * ✅ Kream 상품 링크에서 productId (상품 코드) 추출
+	 * @param link 상품 페이지 URL
+	 * @return 상품 코드 (숫자)
+	 */
+	private String extractProductIdFromLink(String link) {
+		try {
+			String[] parts = link.split("/products/");
+			if (parts.length > 1) {
+				return parts[1].split("\\?")[0]; // "430299?size=" → "430299" 추출
+			}
+		} catch (Exception e) {
+			log.error("🔴 상품 코드 추출 실패: {}", link);
+		}
+		return UUID.randomUUID().toString(); // 실패 시 랜덤값 사용 (예외 방지)
 	}
 }

@@ -5,11 +5,17 @@ import com.team4.giftidea.repository.ProductRepository;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.util.ArrayList;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
 import java.util.List;
+
+import jakarta.transaction.Transactional;
 
 @Service
 public class ProductService {
+	private static final Logger log = LoggerFactory.getLogger(ProductService.class);
 
 	private final ProductRepository productRepository;
 
@@ -36,14 +42,30 @@ public class ProductService {
 	 * @param productList 저장할 상품 리스트
 	 * @param keyword     상품에 연관된 키워드
 	 */
+	@Transactional
 	public void saveItems(List<Product> productList, String keyword) {
-		productList.forEach(product -> {
-			product.setKeyword(keyword); // 상품에 키워드 설정
+		log.info("🟢 [{}] 저장 시작 - 총 {}개", keyword, productList.size());
 
-			// 상품 ID가 존재하지 않으면 저장
-			if (!productRepository.existsByProductId(product.getProductId())) {
+		productList.forEach(product -> {
+			product.setKeyword(keyword);
+
+			// ✅ 기존 상품이 있는 경우 → 업데이트 (덮어쓰기)
+			productRepository.findByProductId(product.getProductId()).ifPresentOrElse(existingProduct -> {
+				existingProduct.setTitle(product.getTitle());
+				existingProduct.setPrice(product.getPrice());
+				existingProduct.setImage(product.getImage());
+				existingProduct.setLink(product.getLink());
+				existingProduct.setMallName(product.getMallName());
+				productRepository.save(existingProduct);
+				log.info("🔄 상품 업데이트 완료 [{}]", existingProduct.getProductId());
+			}, () -> {
+				// ✅ 기존 상품이 없으면 신규 저장
 				productRepository.save(product);
-			}
+				log.info("💾 신규 상품 저장 [{}]", product.getProductId());
+			});
 		});
+
+		productRepository.flush();
+		log.info("✅ [{}] 저장 완료 (flush 호출됨)", keyword);
 	}
 }
