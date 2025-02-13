@@ -22,7 +22,7 @@ import java.io.*;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 
-@Tag(name = "GPT 추천 API", description = "GPT를 이용하여 사용자 맞춤 선물 추천을 제공하는 API")
+@Tag(name = "🎁 GPT 추천 API", description = "카카오톡 대화를 분석하여 GPT를 통해 추천 선물을 제공하는 API")
 @RestController
 @RequestMapping("/api/gpt")
 @Slf4j
@@ -49,39 +49,38 @@ public class GptController {
    * @param theme      선물 테마 (예: "birthday", "valentine")
    * @return 추천된 상품 목록
    */
-  @Operation(summary = "대화 분석 후 추천 상품 반환", description = "카카오톡 대화를 분석하여 GPT API를 통해 키워드를 추출하고, 해당 키워드에 맞는 추천 상품을 반환합니다.")
+  @Operation(
+      summary = "카톡 대화 분석 후 선물 추천",
+      description = "카카오톡 대화 파일을 분석하여 GPT API를 이용해 키워드를 추출하고, 이에 맞는 추천 상품을 반환합니다."
+  )
   @ApiResponses({
       @ApiResponse(responseCode = "200", description = "추천 상품 목록 반환"),
       @ApiResponse(responseCode = "400", description = "잘못된 요청 파라미터"),
+      @ApiResponse(responseCode = "415", description = "지원되지 않는 파일 형식"),
       @ApiResponse(responseCode = "500", description = "서버 내부 오류 발생")
   })
-  @PostMapping("/process")
+  @PostMapping(value = "/process", consumes = "multipart/form-data", produces = "application/json")
   public List<Product> processFileAndRecommend(
-      @RequestParam("file") @Parameter(description = "카카오톡 대화 내용이 포함된 파일", required = true) MultipartFile file,
-      @RequestParam("targetName") @Parameter(description = "대상 이름", required = true) String targetName,
-      @RequestParam("relation") @Parameter(description = "대상과의 관계", required = true) String relation,
-      @RequestParam("sex") @Parameter(description = "대상 성별", required = true) String sex,
-      @RequestParam("theme") @Parameter(description = "선물의 주제", required = true) String theme) {
+      @RequestParam("file") @Parameter(description = "카카오톡 대화 파일 (.txt)", required = true) MultipartFile file,
+      @RequestParam("targetName") @Parameter(description = "분석 대상 이름 (예: '여자친구')", required = true) String targetName,
+      @RequestParam("relation") @Parameter(description = "대상과의 관계 (couple, friend, parent 등)", required = true) String relation,
+      @RequestParam("sex") @Parameter(description = "대상 성별 (male 또는 female)", required = true) String sex,
+      @RequestParam("theme") @Parameter(description = "선물 주제 (birthday, valentine 등)", required = true) String theme
+  ) {
 
     // 1. 파일 전처리
     List<String> processedMessages = preprocessKakaoFile(file, targetName);
 
     // 2. GPT API 호출: 전처리된 메시지로 키워드 반환
-    String categories = generatePrompt(processedMessages, relation, sex, theme);  // 이미 키워드를 추출했음
+    String categories = generatePrompt(processedMessages, relation, sex, theme);
 
-    // 3. 키워드 리스트로 변환된 값 그대로 사용
+    // 3. 키워드 리스트 변환 및 상품 검색
     List<String> keywords = Arrays.asList(categories.split(","));
-    keywords.replaceAll(String::trim);  // 공백 제거
+    keywords.replaceAll(String::trim);
 
-    log.debug("추출된 키워드 목록: {}", keywords);
-
-    // 4. 상품 검색 (DB에서 키워드 기반으로 추천 상품 검색)
     List<Product> products = productService.searchByKeywords(keywords);
 
-    // 검색된 상품 확인 로그
-    log.debug("검색된 상품: {}", products);
-
-    return products;  // 상품 목록 반환
+    return products;
   }
 
   private static final int MAX_TOKENS = 15000; // 15000 토큰 제한
@@ -178,32 +177,31 @@ public class GptController {
   private String generatePrompt(List<String> processedMessages, String relation, String sex, String theme) {
     String combinedMessages = String.join("\n", processedMessages);  // List<String>을 하나의 String으로 합침
 
-    switch (relation) {
-      case "couple":
-        return sex.equals("male") ? extractKeywordsAndReasonsCoupleMan(theme, combinedMessages)
-            : extractKeywordsAndReasonsCoupleWoman(theme, combinedMessages);
-      case "parent":
-        return extractKeywordsAndReasonsParents(theme, combinedMessages);
-      case "friend":
-        return extractKeywordsAndReasonsFriend(theme, combinedMessages);
-      case "housewarming":
-        return extractKeywordsAndReasonsHousewarming(combinedMessages);
-      case "valentine":
-        return extractKeywordsAndReasonsSeasonal(theme, combinedMessages);
-      default:
-        return "조건에 맞는 선물 추천이 없습니다.";
+    if ("couple".equals(relation)) {
+      if ("male".equals(sex)) {
+        return extractKeywordsAndReasonsCoupleMan(theme, combinedMessages);
+      } else if ("female".equals(sex)) {
+        return extractKeywordsAndReasonsCoupleWoman(theme, combinedMessages);
+      }
+    } else if ("parent".equals(relation)) {
+      return extractKeywordsAndReasonsParents(theme, combinedMessages);
+    } else if ("friend".equals(relation)) {
+      return extractKeywordsAndReasonsFriend(theme, combinedMessages);
+    } else if ("housewarming".equals(theme)) {
+      return extractKeywordsAndReasonsHousewarming(combinedMessages);
+    } else if ("valentine".equals(theme)) {
+      return extractKeywordsAndReasonsSeasonal(theme, combinedMessages);
     }
+
+    return "조건에 맞는 선물 추천 기능이 없습니다.";
   }
 
   private String generateText(String prompt) {
     GptRequestDTO request = new GptRequestDTO(gptConfig.getModel(), prompt);
     try {
-      log.info("GPT 요청 시작 - 모델: {}", gptConfig.getModel());
-      log.debug("요청 내용: {}", prompt);
 
       // HTTP 요청 전에 request 객체 로깅
       ObjectMapper mapper = new ObjectMapper();
-      log.debug("전체 요청 바디: {}", mapper.writeValueAsString(request));
 
       GptResponseDTO response = restTemplate.postForObject(gptConfig.getApiUrl(), request, GptResponseDTO.class);
 
@@ -214,12 +212,10 @@ public class GptController {
         // 응답에 'choices'가 있고, 그 중 첫 번째 항목이 존재하는지 확인
         if (response.getChoices() != null && !response.getChoices().isEmpty()) {
           String content = response.getChoices().get(0).getMessage().getContent();
-          log.debug("추출된 콘텐츠: {}", content);
 
           // 필요한 형태로 카테고리 추출 (예: "1. [무선이어폰, 스마트워치, 향수]" 형태)
           if (content.contains("1.")) {
             String categories = content.split("1.")[1].split("\n")[0]; // 첫 번째 카테고리 라인 추출
-            log.debug("GPT 응답에서 추출된 카테고리: {}", categories);
 
             // 괄호 안의 항목들을 추출하고, 쉼표로 구분하여 키워드 리스트 만들기
             String[] categoryArray = categories.split("\\[|\\]")[1].split(",");
@@ -240,7 +236,6 @@ public class GptController {
       return "GPT 응답 오류 발생";
     } catch (Exception e) {
       log.error("GPT 요청 중 오류 발생: ", e);
-      log.error("상세 오류 메시지: {}", e.getMessage());
       if (e.getCause() != null) {
         log.error("원인 예외: {}", e.getCause().getMessage());
       }
