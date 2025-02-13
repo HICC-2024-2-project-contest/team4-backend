@@ -47,10 +47,11 @@ public class SecurityConfig {
 
         // 허용할 출처 설정
         configuration.setAllowedOrigins(List.of(
-                "http://localhost:5174",
+                "http://localhost:5173",
                 "http://localhost:3000",
                 "https://presentalk.store",
-                "https://app.presentalk.store"
+                "https://app.presentalk.store",
+                "http://presentalk.s3-website.ap-northeast-2.amazonaws.com"
         ));
         
         // 허용할 HTTP 메서드 설정
