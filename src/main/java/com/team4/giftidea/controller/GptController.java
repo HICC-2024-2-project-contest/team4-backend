@@ -184,13 +184,21 @@ public class GptController {
         return extractKeywordsAndReasonsCoupleWoman(theme, combinedMessages);
       }
     } else if ("parent".equals(relation)) {
-      return extractKeywordsAndReasonsParents(theme, combinedMessages);
+      if ("male".equals(sex)) {
+        return extractKeywordsAndReasonsDad(theme, combinedMessages);
+      } else if ("female".equals(sex)) {
+        return extractKeywordsAndReasonsMom(theme, combinedMessages);
+      }
     } else if ("friend".equals(relation)) {
       return extractKeywordsAndReasonsFriend(theme, combinedMessages);
     } else if ("housewarming".equals(theme)) {
       return extractKeywordsAndReasonsHousewarming(combinedMessages);
     } else if ("valentine".equals(theme)) {
-      return extractKeywordsAndReasonsSeasonal(theme, combinedMessages);
+      if ("male".equals(sex)) {
+        return extractKeywordsAndReasonsSeasonalMan(theme, combinedMessages);
+      } else if ("female".equals(sex)) {
+        return extractKeywordsAndReasonsSeasonalWoman(theme, combinedMessages);
+      }
     }
 
     return "조건에 맞는 선물 추천 기능이 없습니다.";
@@ -246,7 +254,7 @@ public class GptController {
   private String extractKeywordsAndReasonsCoupleMan(String theme, String message) {
     String prompt = String.format("""
     다음 텍스트를 참고하여 남자 애인이 %s에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
-    카테고리: 남성 지갑, 남성 스니커즈, 백팩, 토트백, 크로스백, 벨트, 선글라스, 향수, 헬스가방, 무선이어폰, 스마트워치
+    카테고리: 남성 지갑, 남성 스니커즈, 백팩, 토트백, 크로스백, 벨트, 선글라스, 향수, 헬스가방, 무선이어폰, 스마트워치, 맨투맨, 마우스, 키보드, 전기면도기, 게임기
 
     텍스트: %s
 
@@ -264,7 +272,7 @@ public class GptController {
   private String extractKeywordsAndReasonsCoupleWoman(String theme, String message) {
     String prompt = String.format("""
     다음 텍스트를 참고하여 여자 애인이 %s에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
-    카테고리: 여성 지갑, 여성 스니커즈, 숄더백, 토트백, 크로스백, 향수, 목걸이, 무선이어폰, 스마트워치
+    카테고리: 여성 지갑, 여성 스니커즈, 숄더백, 토트백, 크로스백, 향수, 목걸이, 무선이어폰, 스마트워치, 에어랩
 
     텍스트: %s
 
@@ -279,10 +287,28 @@ public class GptController {
     return generateText(prompt);  // GPT 모델 호출
   }
 
-  private String extractKeywordsAndReasonsParents(String theme, String message) {
+  private String extractKeywordsAndReasonsDad(String theme, String message) {
     String prompt = String.format("""
     다음 텍스트를 참고하여 부모님이 %s에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
-    카테고리: 현금 박스, 안마기기, 부모님 신발, 건강식품
+    카테고리: 현금 박스, 안마기기, 아버지 신발, 시계
+
+    텍스트: %s
+
+    출력 형식:
+    1. [카테고리1,카테고리2,카테고리3]
+    2. 
+       - 카테고리1: [근거1]
+       - 카테고리2: [근거2]
+       - 카테고리3: [근거3]
+    """, theme, message);
+
+    return generateText(prompt);
+  }
+
+  private String extractKeywordsAndReasonsMom(String theme, String message) {
+    String prompt = String.format("""
+    다음 텍스트를 참고하여 부모님이 %s에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
+    카테고리: 현금 박스, 안마기기, 어머니 신발, 건강식품, 스카프
 
     텍스트: %s
 
@@ -301,7 +327,7 @@ public class GptController {
     String prompt = String.format("""
     다음 텍스트를 참고하여 친구가 %s에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
     제시된 카테고리에 없는 추천 선물이 있다면 3개에 포함해주세요.
-    카테고리: 핸드크림, 텀블러, 립밤
+    카테고리: 핸드크림, 텀블러, 립밤, 머플러, 비타민, 입욕제, 블루투스 스피커
 
     텍스트: %s
 
@@ -319,7 +345,7 @@ public class GptController {
   private String extractKeywordsAndReasonsHousewarming(String message) {
     String prompt = String.format("""
     다음 텍스트를 참고하여 집들이에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
-    카테고리: 조명, 핸드워시, 식기, 디퓨저, 꽃, 오설록 티세트, 휴지
+    카테고리: 조명, 핸드워시, 식기, 디퓨저, 오설록 티세트, 휴지, 파자마세트, 무드등, 디퓨저, 수건, 전기포트, 에어프라이기
 
     텍스트: %s
 
@@ -334,10 +360,28 @@ public class GptController {
     return generateText(prompt);
   }
 
-  private String extractKeywordsAndReasonsSeasonal(String theme, String message) {
+  private String extractKeywordsAndReasonsSeasonalMan(String theme, String message) {
     String prompt = String.format("""
     다음 텍스트를 참고하여 %s에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
-    카테고리: 초콜릿, 수제 초콜릿 키트, 립밤, 파자마세트
+    카테고리: 초콜릿, 수제 초콜릿 키트, 파자마세트, 남자 화장품
+
+    텍스트: %s
+
+    출력 형식:
+    1. [카테고리1,카테고리2,카테고리3]
+    2. 
+       - 카테고리1: [근거1]
+       - 카테고리2: [근거2]
+       - 카테고리3: [근거3]
+    """, theme, message);
+
+    return generateText(prompt);
+  }
+
+  private String extractKeywordsAndReasonsSeasonalWoman(String theme, String message) {
+    String prompt = String.format("""
+    다음 텍스트를 참고하여 %s에 선물로 받으면 좋아할 카테고리 3개와 판단에 참고한 대화를 제공해주세요. 
+    카테고리: 초콜릿, 수제 초콜릿 키트, 립밤, 파자마세트, 립스틱
 
     텍스트: %s
 
