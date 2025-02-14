@@ -1,5 +1,23 @@
 package com.team4.giftidea.controller;
 
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
+import io.swagger.v3.oas.annotations.responses.ApiResponse;
+import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import lombok.extern.slf4j.Slf4j;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.web.bind.annotation.*;
+import org.springframework.web.client.RestTemplate;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.*;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.team4.giftidea.configuration.GptConfig;
 import com.team4.giftidea.dto.GptRequestDTO;
@@ -7,25 +25,9 @@ import com.team4.giftidea.dto.GptResponseDTO;
 import com.team4.giftidea.entity.Product;
 import com.team4.giftidea.service.ProductService;
 
-import io.swagger.v3.oas.annotations.Operation;
-import io.swagger.v3.oas.annotations.Parameter;
-import io.swagger.v3.oas.annotations.responses.ApiResponse;
-import io.swagger.v3.oas.annotations.responses.ApiResponses;
-import io.swagger.v3.oas.annotations.tags.Tag;
-import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.web.bind.annotation.*;
-import org.springframework.web.multipart.MultipartFile;
-import org.springframework.web.client.RestTemplate;
-
-import java.io.*;
-import java.nio.charset.StandardCharsets;
-import java.util.*;
-
-@Tag(name = "🎁 GPT 추천 API", description = "카카오톡 대화를 분석하여 GPT를 통해 추천 선물을 제공하는 API")
+@Slf4j
 @RestController
 @RequestMapping("/api/gpt")
-@Slf4j
 public class GptController {
 
   private final RestTemplate restTemplate;
@@ -39,15 +41,17 @@ public class GptController {
     this.productService = productService;
   }
 
+
+  // GPT 모델의 입력 토큰 제한 (예: 출력 토큰 고려 후 설정, 여기서는 예시로 25000)
+  private static final int GPT_INPUT_LIMIT = 12000;
+
   /**
-   * 카카오톡 대화 파일을 분석하여 키워드를 추출하고, 추천 상품 목록을 반환하는 API
+   * 파일의 아랫부분부터 토큰을 센 후, 총 토큰 수가 GPT_INPUT_LIMIT 이하인 내용만
+   * 선택하여 로컬에 저장하고, 그 청크를 반환합니다.
    *
-   * @param file       카카오톡 대화 내용이 포함된 파일
-   * @param targetName 대상 이름 (예: "여자친구", "남자친구")
-   * @param relation   관계 (예: "couple", "friend", "parent")
-   * @param sex        대상 성별 ("male" 또는 "female")
-   * @param theme      선물 테마 (예: "birthday", "valentine")
-   * @return 추천된 상품 목록
+   * @param file       업로드된 카카오톡 대화 파일 (.txt)
+   * @param targetName 대상 이름 (예: "여자친구")
+   * @return 전처리된 청크 (아랫부분부터 토큰 누적하여 GPT_INPUT_LIMIT 이하)
    */
   @Operation(
       summary = "카톡 대화 분석 후 선물 추천",
@@ -68,8 +72,48 @@ public class GptController {
       @RequestParam("theme") @Parameter(description = "선물 주제 (birthday, valentine 등)", required = true) String theme
   ) {
 
-    // 1. 파일 전처리
-    List<String> processedMessages = preprocessKakaoFile(file, targetName);
+    List<String> processedMessages = new ArrayList<>();
+    int formatType = detectFormatType(file);
+
+    // 1. 파일의 모든 줄을 읽고, targetName이 포함된 줄만 필터링하여 리스트에 저장
+    List<String> allTargetLines = new ArrayList<>();
+    try (BufferedReader reader = new BufferedReader(
+        new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
+      String line;
+      while ((line = reader.readLine()) != null) {
+        if (line.contains(targetName) && !line.trim().isEmpty()) {
+          String formattedLine = formatLine(line, formatType, targetName);
+          allTargetLines.add(formattedLine);
+        }
+      }
+    } catch (IOException e) {
+      log.error("파일 읽기 오류: ", e);
+    }
+
+    // 2. 파일의 아랫부분부터 토큰을 누적 (역순으로 처리)
+    int currentTokenCount = 0;
+    List<String> selectedLines = new ArrayList<>();
+    // reverse 순회
+    for (int i = allTargetLines.size() - 1; i >= 0; i--) {
+      String currentLine = allTargetLines.get(i);
+      int tokenCount = countTokens(currentLine);
+      if (currentTokenCount + tokenCount > GPT_INPUT_LIMIT) {
+        // 토큰 제한을 초과하면 중단
+        break;
+      }
+      // 아랫부분부터 선택하므로, 먼저 선택된 줄이 마지막에 온다.
+      selectedLines.add(currentLine);
+      currentTokenCount += tokenCount;
+    }
+    // 원래 순서대로 복원 (파일에서 아랫부분이 우선이므로, 리스트를 reverse)
+    Collections.reverse(selectedLines);
+
+    // 3. 선택된 줄들을 하나의 청크로 합침
+    StringBuilder finalChunk = new StringBuilder();
+    for (String s : selectedLines) {
+      finalChunk.append(s).append("\n");
+    }
+    processedMessages.add(finalChunk.toString());
 
     // 2. GPT API 호출: 전처리된 메시지로 키워드 반환
     String categories = generatePrompt(processedMessages, relation, sex, theme);
@@ -83,95 +127,37 @@ public class GptController {
     return products;
   }
 
-  private static final int MAX_TOKENS = 15000; // 15000 토큰 제한
-
-  private List<String> preprocessKakaoFile(MultipartFile file, String targetName) {
-    List<String> processedMessages = new ArrayList<>();
-    int formatType = detectFormatType(file);
-    File outputFile = null;
-    int currentTokenCount = 0;
-    StringBuilder currentChunk = new StringBuilder();
-
-    try {
-      outputFile = File.createTempFile("processed_kakaochat", ".txt");
-
-      try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8));
-           BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile))) {
-
-        String line;
-        while ((line = reader.readLine()) != null) {
-          // 해당 targetName이 포함된 경우만 처리
-          if (line.contains(targetName) && !line.trim().isEmpty()) {
-            String formattedLine = formatLine(line, formatType, targetName);
-            int lineTokenCount = countTokens(formattedLine);
-
-            // 현재 청크가 15000 토큰을 초과할 경우 새로운 청크 생성
-            if (currentTokenCount + lineTokenCount > MAX_TOKENS) {
-              processedMessages.add(currentChunk.toString()); // 기존 청크 저장
-              currentChunk.setLength(0); // 새 청크 초기화
-              currentTokenCount = 0;
-            }
-
-            // 현재 청크에 추가
-            currentChunk.append(formattedLine).append("\n");
-            currentTokenCount += lineTokenCount;
-            writer.write(formattedLine);
-            writer.newLine();
-          }
-        }
-
-        // 마지막 청크 추가
-        if (currentChunk.length() > 0) {
-          processedMessages.add(currentChunk.toString());
-        }
-
+  private int detectFormatType(MultipartFile file) {
+    try (BufferedReader reader = new BufferedReader(
+        new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
+      String firstLine = reader.readLine();
+      if (firstLine != null && firstLine.contains("님과 카카오톡 대화")) {
+        return 1;
+      } else {
+        return 2;
       }
     } catch (IOException e) {
-      log.error("파일 처리 오류: ", e);
+      log.error("파일 판별 오류: ", e);
     }
-
-    // 파일 삭제 (전처리 후 필요 없으므로 삭제)
-    if (outputFile != null) {
-      outputFile.delete();
-    }
-
-    return processedMessages;
+    return 0;
   }
 
-  /**
-   * ✅ Format Type에 따라 카카오톡 메시지를 정리
-   */
   private String formatLine(String line, int formatType, String targetName) {
     if (formatType == 1) {
-      return line.replaceAll("\\[.*?\\] \\[.*?\\] ", "").replaceAll("[ㅎㅋ.]+", "").trim(); // 양식 1: [시간] [이름] 제거
+      return line.replaceAll("\\[.*?\\] \\[.*?\\] ", "")
+          .replaceAll("[ㅎㅋ.]+", "").trim();
     } else if (formatType == 2) {
-      return line.replaceAll("^" + targetName + " : ", "").replaceAll("[ㅎㅋ.]+", "").trim(); // 양식 2: "이름 :" 제거
+      return line.replaceAll("^" + targetName + " : ", "")
+          .replaceAll("[ㅎㅋ.]+", "").trim();
     }
     return line;
   }
 
-  /**
-   * ✅ 메시지의 토큰 개수 세는 함수 (단순 공백 기준으로 토큰 계산)
-   */
   private int countTokens(String text) {
-    return text.split("\\s+").length; // 공백 기준으로 나누어 토큰 수 계산
-  }
-
-  private int detectFormatType(MultipartFile file) {
-    try (BufferedReader reader = new BufferedReader(new InputStreamReader(file.getInputStream(), StandardCharsets.UTF_8))) {
-      String firstLine = reader.readLine();
-
-      if (firstLine != null && firstLine.contains("님과 카카오톡 대화")) {
-        return 1; // 양식 1
-      } else {
-        return 2; // 양식 2
-      }
-
-    } catch (IOException e) {
-      log.error("파일 판별 오류: ", e);
+    if (text == null || text.isEmpty()) {
+      return 0;
     }
-
-    return 0; // 기본값: 알 수 없는 양식
+    return text.split("\\s+").length;
   }
 
   private String generatePrompt(List<String> processedMessages, String relation, String sex, String theme) {

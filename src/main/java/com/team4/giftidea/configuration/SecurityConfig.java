@@ -5,7 +5,6 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.web.bind.annotation.*;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
@@ -18,8 +17,6 @@ import java.util.List;
  * Spring Security 및 CORS 설정을 담당하는 설정 클래스입니다.
  */
 @Configuration
-@RestController
-@RequestMapping("/api") // 모든 API 요청 처리
 public class SecurityConfig {
 
     /**
@@ -28,12 +25,12 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                .cors(cors -> cors.configurationSource(corsConfigurationSource())) // CORS 적용
-                .csrf(csrf -> csrf.disable()) // CSRF 비활성화
-                .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/admin/**").authenticated() // "/admin/**" 경로는 인증 필요
-                        .anyRequest().permitAll() // 나머지 요청은 인증 없이 허용
-                );
+            .cors(cors -> cors.configurationSource(corsConfigurationSource())) // CORS 적용
+            .csrf(csrf -> csrf.disable()) // CSRF 비활성화
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/admin/**").authenticated() // "/admin/**" 경로는 인증 필요
+                .anyRequest().permitAll() // 나머지 요청은 인증 없이 허용
+            );
 
         return http.build();
     }
@@ -47,13 +44,11 @@ public class SecurityConfig {
 
         // 허용할 출처 설정
         configuration.setAllowedOrigins(List.of(
-                "http://localhost:5173",
-                "http://localhost:3000",
-                "https://presentalk.store",
-                "https://app.presentalk.store",
-                "http://presentalk.s3-website.ap-northeast-2.amazonaws.com"
+            "http://localhost:5173",
+            "https://presentalk.store",
+            "https://app.presentalk.store"
         ));
-        
+
         // 허용할 HTTP 메서드 설정
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
 
@@ -78,13 +73,5 @@ public class SecurityConfig {
         FilterRegistrationBean<CorsFilter> filterBean = new FilterRegistrationBean<>(new CorsFilter(corsConfigurationSource()));
         filterBean.setOrder(0); // 가장 먼저 실행되도록 설정
         return filterBean;
-    }
-
-    /**
-     * OPTIONS 요청을 수동으로 처리 (CORS 문제 해결)
-     */
-    @RequestMapping(value = "/**", method = RequestMethod.OPTIONS)
-    public ResponseEntity<?> handleOptions() {
-        return ResponseEntity.ok().build();
     }
 }
